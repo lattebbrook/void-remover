@@ -1,9 +1,12 @@
 package main
 
 import (
+	"mime/multipart"
 	"strings"
 
 	"os"
+
+	"uuid"
 
 	"github.com/gofiber/fiber/v3"
 )
@@ -33,24 +36,19 @@ func main() {
 			})
 		}
 
-		// 1.0 validate file extension first (only accept png, jpg, jpeg)
-		allowedExtensions := map[string]bool{
-			".png":  true,
-			".jpg":  true,
-			".jpeg": true,
-		}
-
 		fileExtension := strings.ToLower(file.Filename[strings.LastIndex(file.Filename, "."):])
 
-		if !allowedExtensions[fileExtension] {
+		// 1. validate file size & length (max 10MB)
+		if !validateFile(file.Filename, file, fileExtension) { // 10MB
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Invalid file extension",
+				"error": err.Error(),
 			})
 		}
 
-		// TODO: rename the file to a unique name to avoid conflicts
+		// Normalize file name to avoid collisions and security issues
+		file.Filename = uuid.New().String() + fileExtension
 
-		filePath := "./temp/" + file.Filename
+		filePath := tempDir + file.Filename
 		err = c.SaveFile(file, filePath)
 
 		if err != nil {
@@ -71,7 +69,27 @@ func main() {
 	app.Listen(":3000")
 }
 
-func processFile(filePath string) {
-	// trigger call to external python script to process the file
+func validateFile(fileName string, file *multipart.FileHeader, fileExtension string) bool {
+	// 1 check size of file 10 MB max
+	if file.Size > 10*1024*1024 {
+		panic("43000") // payload too large > 10MB
+	}
 
+	// 2 check length of file name
+	if len(fileName) > 255 {
+		panic("42000") // bad request length of file name too long
+	}
+
+	// 2. validate file extension first (only accept png, jpg, jpeg)
+	allowedExtensions := map[string]bool{
+		".png":  true,
+		".jpg":  true,
+		".jpeg": true,
+	}
+
+	if !allowedExtensions[fileExtension] {
+		panic("41000") // bad request invalid file extension
+	}
+
+	return true
 }
