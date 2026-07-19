@@ -10,7 +10,7 @@ import (
 	"net/http"
 )
 
-func (v *structValidator) validateFile(file multipart.File, fileName string, fileExtension string) bool {
+func (v *structValidator) validateFile(file multipart.File, fileName string, fileExtension string) []byte {
 	data, err := io.ReadAll(io.LimitReader(file, fileSizeLimit+1))
 
 	if err != nil {
@@ -102,5 +102,5 @@ func (v *structValidator) validateFile(file multipart.File, fileName string, fil
 		panic("50000") // internal server error or failed to encode image
 	}
 
-	return true
+	return cleaned.Bytes()
 }

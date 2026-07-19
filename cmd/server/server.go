@@ -2,13 +2,16 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/logger"
 	"github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"github.com/google/uuid"
 )
 
@@ -30,6 +33,22 @@ type structValidator struct {
 
 func main() {
 	app := fiber.New()
+
+	// Initialize default config
+	app.Use(logger.New())
+	// Logging Request ID
+	app.Use(requestid.New()) // Ensure requestid middleware is used before the logger
+	app.Use(logger.New(logger.Config{
+		// requestid.New() registers ${requestid} automatically.
+		Format: "${pid} ${requestid} ${status} - ${method} ${path}\n",
+	}))
+
+	// Changing TimeZone & TimeFormat
+	app.Use(logger.New(logger.Config{
+		Format:     "${pid} ${status} - ${method} ${path}\n",
+		TimeFormat: "02-Jan-2006",
+		TimeZone:   "Asia/Bangkok",
+	}))
 
 	app.Use(recover.New(recover.Config{
 		PanicHandler: func(c fiber.Ctx, recovered any) error {
@@ -75,6 +94,7 @@ func main() {
 		file, err := c.FormFile("file")
 
 		if err != nil {
+			log.Println("Error retrieving the file:", err)
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "Failed to parse file",
 			})
@@ -83,6 +103,7 @@ func main() {
 		fileExtension := strings.ToLower(filepath.Ext(file.Filename))
 
 		if fileExtension == "" {
+			log.Println(file.Filename + ": File extension is required")
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": "File extension is required",
 			})
@@ -91,6 +112,7 @@ func main() {
 		f, err := file.Open()
 
 		if err != nil {
+			log.Println("Error opening file:", err)
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "Failed to open file",
 			})
@@ -99,30 +121,38 @@ func main() {
 		defer f.Close()
 
 		// 1. validate file size & length (max 10MB) & file type and extension (only png, jpg, jpeg)
-		if !v.validateFile(f, file.Filename, fileExtension) {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "Invalid file",
-			})
-		}
+		cleanedData := v.validateFile(f, file.Filename, fileExtension)
 
-		// Normalize file name to avoid collisions and security issues
-		file.Filename = uuid.New().String() + fileExtension
+		id := uuid.New().String()
 
-		filePath := filepath.Join(tempDir, file.Filename)
-		err = c.SaveFile(file, filePath)
+		originalPath := filepath.Join(tempDir, id+"-original"+fileExtension)
+		cleanedPath := filepath.Join(tempDir, id+"-cleaned"+fileExtension)
 
-		if err != nil {
+		// Preserve the customer's original upload.
+		if err := c.SaveFile(file, originalPath); err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "Failed to save file",
+				"error": "Failed to save original file",
 			})
 		}
 
-		// call lucida remove endpoint function to process the file
-		fileProcessing(filePath)
+		// Save the sanitized version for Lambda processing.
+		if err := os.WriteFile(cleanedPath, cleanedData, 0600); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to save cleaned file",
+			})
+		}
+
+		//fileProcessing(cleanedPath)
+
+		defer func() {
+			// Clean up the temporary files after processing.
+			os.Remove(originalPath)
+			os.Remove(cleanedPath)
+		}()
 
 		return c.JSON(fiber.Map{
 			"message": "File uploaded successfully",
-			"path":    filePath,
+			"path":    cleanedPath,
 		})
 	})
 
