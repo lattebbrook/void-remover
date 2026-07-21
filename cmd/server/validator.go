@@ -17,9 +17,9 @@ func (v *structValidator) validateFile(file multipart.File, fileName string, fil
 		panic("50000") // internal server error or failed to read file
 	}
 
-	// 1 check size of file 10 MB max
+	// 1 check size of file 4 MB max
 	if len(data) > fileSizeLimit {
-		panic("43000") // payload too large > 10MB
+		panic("43000") // payload too large > 4MB
 	}
 
 	// 2 check length of file name

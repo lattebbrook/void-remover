@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
@@ -17,14 +19,14 @@ import (
 
 // os environment variables
 var tempDir string = os.Getenv("TEMP_DIR")
-var lambdaEndpoint string = os.Getenv("LAMBDA_ENDPOINT")
 
 // static variables
 var basePath string = "/api/v1"
 
 const (
-	fileSizeLimit = 10 * 1024 * 1024 // 10 MB
-	maxPixels     = 25_000_000       // 25 million pixels
+	fileSizeLimit      = 4 * 1024 * 1024 // 4 MB
+	multipartBodyLimit = fileSizeLimit + 1024*1024
+	maxPixels          = 25_000_000 // 25 million pixels
 )
 
 type structValidator struct {
@@ -32,7 +34,16 @@ type structValidator struct {
 }
 
 func main() {
-	app := fiber.New()
+	processor, err := newFileProcessor(context.Background())
+	if err != nil {
+		log.Fatal("Failed to initialize AWS clients:", err)
+	}
+
+	app := fiber.New(fiber.Config{
+		// Allow room for multipart headers while validateFile enforces the
+		// actual 4 MB limit on the uploaded image bytes.
+		BodyLimit: multipartBodyLimit,
+	})
 
 	// Initialize default config
 	app.Use(logger.New())
@@ -120,13 +131,19 @@ func main() {
 
 		defer f.Close()
 
-		// 1. validate file size & length (max 10MB) & file type and extension (only png, jpg, jpeg)
+		// 1. validate file size & length (max 4MB) & file type and extension (only png, jpg, jpeg)
 		cleanedData := v.validateFile(f, file.Filename, fileExtension)
 
 		id := uuid.New().String()
 
 		originalPath := filepath.Join(tempDir, id+"-original"+fileExtension)
 		cleanedPath := filepath.Join(tempDir, id+"-cleaned"+fileExtension)
+
+		defer func() {
+			// Clean up the temporary files after the S3 upload has completed.
+			os.Remove(originalPath)
+			os.Remove(cleanedPath)
+		}()
 
 		// Preserve the customer's original upload.
 		if err := c.SaveFile(file, originalPath); err != nil {
@@ -142,17 +159,24 @@ func main() {
 			})
 		}
 
-		//fileProcessing(cleanedPath)
+		processCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-		defer func() {
-			// Clean up the temporary files after processing.
-			os.Remove(originalPath)
-			os.Remove(cleanedPath)
-		}()
+		outputKey, err := processor.process(
+			processCtx,
+			cleanedPath,
+			id,
+			fileExtension,
+		)
+		if err != nil {
+			log.Printf("Failed to submit image job id=%s: %v", id, err)
+			panic("50000")
+		}
 
-		return c.JSON(fiber.Map{
-			"message": "File uploaded successfully",
-			"path":    cleanedPath,
+		return c.Status(fiber.StatusAccepted).JSON(fiber.Map{
+			"message":    "Image processing started",
+			"job_id":     id,
+			"result_key": outputKey,
 		})
 	})
 
