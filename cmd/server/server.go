@@ -39,6 +39,11 @@ func main() {
 		log.Fatal("Failed to initialize AWS clients:", err)
 	}
 
+	turnstile, err := newTurnstileVerifier()
+	if err != nil {
+		log.Fatal("Failed to initialize Turnstile verifier:", err)
+	}
+
 	app := fiber.New(fiber.Config{
 		// Allow room for multipart headers while validateFile enforces the
 		// actual 4 MB limit on the uploaded image bytes.
@@ -101,7 +106,7 @@ func main() {
 	}
 
 	// @@ 3. Upload route
-	app.Post(basePath+"/upload", func(c fiber.Ctx) error {
+	app.Post(basePath+"/upload", requireTurnstile(turnstile), func(c fiber.Ctx) error {
 		file, err := c.FormFile("file")
 
 		if err != nil {
@@ -179,6 +184,9 @@ func main() {
 			"result_key": outputKey,
 		})
 	})
+
+	// @@ 4. Download a completed result through a short-lived S3 URL.
+	app.Get(basePath+"/jobs/:id/download", resultDownloadHandler(processor))
 
 	// port
 	app.Listen(":3000")

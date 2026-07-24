@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -12,13 +13,16 @@ import (
 	awslambda "github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 )
 
 type fileProcessor struct {
-	s3Client     *s3.Client
-	lambdaClient *awslambda.Client
-	bucket       string
-	functionName string
+	s3Client        *s3.Client
+	s3PresignClient *s3.PresignClient
+	lambdaClient    *awslambda.Client
+	bucket          string
+	functionName    string
 }
 
 type lucidaEvent struct {
@@ -48,11 +52,14 @@ func newFileProcessor(ctx context.Context) (*fileProcessor, error) {
 		return nil, fmt.Errorf("AWS_REGION is required")
 	}
 
+	s3Client := s3.NewFromConfig(cfg)
+
 	return &fileProcessor{
-		s3Client:     s3.NewFromConfig(cfg),
-		lambdaClient: awslambda.NewFromConfig(cfg),
-		bucket:       bucket,
-		functionName: functionName,
+		s3Client:        s3Client,
+		s3PresignClient: s3.NewPresignClient(s3Client),
+		lambdaClient:    awslambda.NewFromConfig(cfg),
+		bucket:          bucket,
+		functionName:    functionName,
 	}, nil
 }
 
@@ -81,7 +88,7 @@ func (p *fileProcessor) process(
 	}
 
 	inputKey := "upload/" + jobID + fileExtension
-	outputKey := "results/" + jobID + ".png"
+	outputKey := resultKeyForJob(jobID)
 
 	_, err = p.s3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(p.bucket),
@@ -122,4 +129,58 @@ func (p *fileProcessor) process(
 	}
 
 	return outputKey, nil
+}
+
+func (p *fileProcessor) presignResultDownload(ctx context.Context, jobID string) (string, error) {
+	resultKey := resultKeyForJob(jobID)
+
+	_, err := p.s3Client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(p.bucket),
+		Key:    aws.String(resultKey),
+	})
+	if err != nil {
+		if isS3NotFound(err) {
+			return "", errResultNotFound
+		}
+		return "", fmt.Errorf("check result object: %w", err)
+	}
+
+	presigned, err := p.s3PresignClient.PresignGetObject(
+		ctx,
+		&s3.GetObjectInput{
+			Bucket:                     aws.String(p.bucket),
+			Key:                        aws.String(resultKey),
+			ResponseContentDisposition: aws.String(fmt.Sprintf("attachment; filename=\"void-remover-%s.png\"", jobID)),
+			ResponseContentType:        aws.String("image/png"),
+		},
+		func(options *s3.PresignOptions) {
+			options.Expires = downloadURLTTL
+		},
+	)
+	if err != nil {
+		return "", fmt.Errorf("presign result download: %w", err)
+	}
+
+	return presigned.URL, nil
+}
+
+func resultKeyForJob(jobID string) string {
+	return "results/" + jobID + ".png"
+}
+
+func isS3NotFound(err error) bool {
+	var notFound *s3types.NotFound
+	if errors.As(err, &notFound) {
+		return true
+	}
+
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "NotFound", "NoSuchKey", "NoSuchObject":
+			return true
+		}
+	}
+
+	return false
 }
