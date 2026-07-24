@@ -22,8 +22,8 @@ flowchart LR
     Turnstile -->|"Verification result"| API
     API -->|"PutObject: upload/job-id.ext"| S3
     API -->|"IAM-signed Invoke event"| Lambda
-    Lambda -->|"GetObject: upload/*"| S3
-    Lambda -->|"PutObject: results/*"| S3
+    ECS/Lambda -->|"GetObject: upload/*"| S3
+    ECS/Lambda -->|"PutObject: results/*"| S3
     API -->|"Status and result download"| Browser
 ```
 
