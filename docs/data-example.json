@@ -1,0 +1,8 @@
+{
+  "jobId": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "PROCESSING",
+  "inputKey": "upload/550e8400-e29b-41d4-a716-446655440000.jpg",
+  "resultKey": "results/550e8400-e29b-41d4-a716-446655440000.png",
+  "createdAt": "2026-07-21T12:30:00Z",
+  "expiresAt": 1784809800
+}
