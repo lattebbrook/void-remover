@@ -52,9 +52,6 @@ func newTurnstileVerifier() (*turnstileVerifier, error) {
 	}
 
 	expectedAction := strings.TrimSpace(os.Getenv("TURNSTILE_EXPECTED_ACTION"))
-	if expectedAction == "" {
-		return nil, fmt.Errorf("TURNSTILE_EXPECTED_ACTION is required")
-	}
 
 	return &turnstileVerifier{
 		client: &http.Client{
@@ -147,7 +144,7 @@ func requireTurnstile(verifier *turnstileVerifier) fiber.Handler {
 			})
 		}
 
-		if result.Action != verifier.expectedAction {
+		if verifier.expectedAction != "" && result.Action != verifier.expectedAction {
 			log.Printf(
 				"Turnstile action mismatch: expected=%q received=%q",
 				verifier.expectedAction,

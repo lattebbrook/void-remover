@@ -113,6 +113,16 @@ func TestRequireTurnstile(t *testing.T) {
 			wantStatus: fiber.StatusForbidden,
 		},
 		{
+			name:  "action check is optional",
+			token: "valid-token",
+			response: turnstileResponse{
+				Success:  true,
+				Hostname: "example.com",
+			},
+			wantStatus:        fiber.StatusNoContent,
+			wantHandlerCalled: true,
+		},
+		{
 			name:           "siteverify unavailable",
 			token:          "valid-token",
 			upstreamStatus: http.StatusInternalServerError,
@@ -133,6 +143,9 @@ func TestRequireTurnstile(t *testing.T) {
 			}
 
 			verifier := testTurnstileVerifier(client)
+			if tt.name == "action check is optional" {
+				verifier.expectedAction = ""
+			}
 			app := fiber.New()
 			handlerCalled := false
 			app.Post("/upload", requireTurnstile(verifier), func(c fiber.Ctx) error {
