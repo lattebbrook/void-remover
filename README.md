@@ -75,12 +75,12 @@ lifecycle rule after one day.
 ## Implementation Status
 
 - [x] Go upload validation and temporary-file handling
-- [x] Lambda-compatible Lucida container
+- [x] Lambda-compatible Lucida container --> might change to ECS for better memory management
 - [x] ARM64 ECR build and deployment workflow
 - [x] Least-privilege Lambda access to the S3 input and result prefixes
-- [ ] Cloudflare Turnstile verification in Go
-- [ ] Go upload to S3 and IAM-authenticated Lambda invocation
-- [ ] Processing-status and result-download endpoints
+- [x] Cloudflare Turnstile verification in Go
+- [x] Go upload to S3 and IAM-authenticated Lambda invocation
+- [x] Processing-status and result-download endpoints
 - [ ] JavaScript upload and result interface
 
 Lambda-specific build, event, IAM, and cost notes are documented in
